@@ -1,9 +1,0 @@
-streamlit
-streamlit-webrtc
-numpy
-scipy
-scikit-learn
-pandas
-groq
-python-dotenv
-opencv-python-headless
