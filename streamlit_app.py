@@ -3,6 +3,7 @@ import sys
 import time
 
 import numpy as np
+import requests
 import streamlit as st
 
 st.set_page_config(page_title="FaceVitals", page_icon="🫀", layout="centered")
@@ -120,8 +121,17 @@ else:
             return frame
 
     st.write("Start the camera, sit still facing the light for ~30 seconds, then stop and analyze.")
+    ice_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+    if "METERED_API_KEY" in st.secrets:
+        try:
+            resp = requests.get("https://facevitals.metered.live/api/v1/turn/credentials",
+                                params={"apiKey": st.secrets["METERED_API_KEY"]}, timeout=10)
+            ice_servers = resp.json()
+        except Exception:
+            pass
     ctx = webrtc_streamer(key="facevitals", video_processor_factory=TraceCollector,
-                          media_stream_constraints={"video": True, "audio": False})
+                          media_stream_constraints={"video": True, "audio": False},
+                          rtc_configuration={"iceServers": ice_servers})
     if ctx.video_processor and st.button("Analyze collected frames"):
         samples = ctx.video_processor.samples
         if len(samples) < 150:
