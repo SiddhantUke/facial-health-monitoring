@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FaceVitals - Non-Contact Facial Health Monitoring</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; background: #0e1526; color: #e8eefc;
+         margin: 0; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #9fb2d8; margin-bottom: 18px; font-size: 13px; }
+  .wrap { display: flex; gap: 20px; flex-wrap: wrap; }
+  .panel { background: #16203a; border: 1px solid #26355c; border-radius: 12px; padding: 16px; }
+  .stage { position: relative; width: 480px; max-width: 92vw; }
+  video { width: 100%; border-radius: 8px; background: #000; }
+  .roi { position: absolute; border: 2px solid #35d0a0; border-radius: 4px; opacity: .85; pointer-events: none; }
+  label { font-size: 12px; color: #9fb2d8; display: block; margin-top: 8px; }
+  input, select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #33477a;
+                  background: #0e1526; color: #e8eefc; box-sizing: border-box; }
+  button { background: #2f6df6; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px;
+           font-size: 14px; cursor: pointer; margin: 12px 8px 0 0; }
+  button.demo { background: #31456f; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .card { background: #101b33; border: 1px solid #26355c; border-radius: 10px; padding: 12px 16px; min-width: 130px; }
+  .card .k { font-size: 11px; color: #9fb2d8; text-transform: uppercase; letter-spacing: .06em; }
+  .card .v { font-size: 24px; font-weight: 600; margin: 4px 0; }
+  .card .t { font-size: 11px; color: #7fd8bd; }
+  #status { margin-top: 12px; font-size: 13px; color: #ffd479; min-height: 18px; }
+  #insight { margin-top: 14px; font-size: 14px; line-height: 1.55; }
+  #insight .src { color: #9fb2d8; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>FaceVitals — Non-Contact Facial Health Monitoring</h1>
+<div class="sub">30-second face scan → rPPG heart rate (measured) · BP (model estimate) · cholesterol &amp; glucose (screening estimates)</div>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="stage">
+      <video id="cam" autoplay playsinline muted></video>
+      <div class="roi" style="left:42%; top:8%;  width:16%; height:12%;"></div>
+      <div class="roi" style="left:30%; top:45%; width:12%; height:15%;"></div>
+      <div class="roi" style="left:58%; top:45%; width:12%; height:15%;"></div>
+    </div>
+    <div id="status">Camera idle. Fill the profile, then start a scan — or run the demo scan.</div>
+    <button id="scanBtn">Start 30s webcam scan</button>
+    <button id="demoBtn" class="demo">Demo scan (no camera)</button>
+  </div>
+
+  <div class="panel" style="width:250px;">
+    <b>Profile</b>
+    <label>Age</label><input id="age" type="number" value="40">
+    <label>Sex</label><select id="sex"><option>M</option><option>F</option></select>
+    <label>BMI</label><input id="bmi" type="number" step="0.1" value="26">
+    <label>Smoker (0/1)</label><input id="smoker" type="number" value="0">
+    <label>Family history of BP/diabetes (0/1)</label><input id="fam" type="number" value="1">
+    <label>Activity level (0 sedentary – 3 athlete)</label><input id="act" type="number" value="1">
+  </div>
+</div>
+
+<div class="cards" id="cards"></div>
+<div id="insight"></div>
+
+<canvas id="work" width="320" height="240" style="display:none"></canvas>
+<script>
+const ROIS = [[0.42,0.08,0.58,0.20],[0.30,0.45,0.42,0.60],[0.58,0.45,0.70,0.60]]; // forehead, cheeks
+const $ = id => document.getElementById(id);
+let stream = null, timer = null, trace = [], t0 = 0;
+
+function profile() {
+  return { age: +$("age").value, sex: $("sex").value, bmi: +$("bmi").value,
+           smoker: +$("smoker").value, family_history: +$("fam").value,
+           activity_level: +$("act").value };
+}
+function setBusy(b) { $("scanBtn").disabled = b; $("demoBtn").disabled = b; }
+
+async function startCamera() {
+  if (stream) return;
+  stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  $("cam").srcObject = stream;
+}
+
+function sampleFrame() {
+  const c = $("work"), ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage($("cam"), 0, 0, c.width, c.height);
+  const img = ctx.getImageData(0, 0, c.width, c.height).data;
+  const sums = [0, 0, 0]; let n = 0;
+  for (const [x0, y0, x1, y1] of ROIS) {
+    const xa = Math.floor(x0 * c.width), xb = Math.floor(x1 * c.width);
+    const ya = Math.floor(y0 * c.height), yb = Math.floor(y1 * c.height);
+    for (let y = ya; y < yb; y += 2) for (let x = xa; x < xb; x += 2) {
+      const i = (y * c.width + x) * 4;
+      sums[0] += img[i]; sums[1] += img[i + 1]; sums[2] += img[i + 2]; n++;
+    }
+  }
+  trace.push([sums[0] / n, sums[1] / n, sums[2] / n]);
+  const secs = (performance.now() - t0) / 1000;
+  $("status").textContent = "Scanning… " + secs.toFixed(0) + "s / 30s — stay still, face the light.";
+  if (secs >= 30) finishScan(trace.length / secs);
+}
+
+async function startScan() {
+  try { await startCamera(); } catch (e) { $("status").textContent = "Camera blocked: " + e.message; return; }
+  setBusy(true); trace = []; t0 = performance.now();
+  timer = setInterval(sampleFrame, 33);
+}
+function finishScan(fps) {
+  clearInterval(timer); setBusy(false);
+  send({ rgb: trace, fps: Math.round(fps * 10) / 10, profile: profile() });
+}
+function demoScan() {
+  setBusy(true);
+  const tr = [];
+  for (let i = 0; i < 900; i++) {
+    const pulse = 0.5 + 0.5 * Math.sin(2 * Math.PI * 1.2 * (i / 30));
+    tr.push([110 + pulse * 2 + (Math.random() - .5) * .8,
+             95 + pulse * 6 + (Math.random() - .5) * .8,
+             80 + pulse * 2.5 + (Math.random() - .5) * .8]);
+  }
+  send({ rgb: tr, fps: 30, profile: profile() });
+  setBusy(false);
+}
+
+async function send(payload) {
+  $("status").textContent = "Analysing…";
+  const r = await fetch("/api/analyze", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const d = await r.json();
+  if (d.status === "rescan") { $("status").textContent = "⚠ " + d.message + " (quality " + d.signal_quality + ")"; return; }
+  if (d.status !== "ok") { $("status").textContent = "Error: " + (d.message || "unknown"); return; }
+  $("status").textContent = "Scan complete — signal quality " + d.vitals.signal_quality + " (" + d.quality_verdict + ")";
+  const v = d.vitals, b = v.blood_pressure, c = v.cholesterol_total, g = v.blood_glucose_fasting_est;
+  const card = (k, val, t) => '<div class="card"><div class="k">' + k + '</div><div class="v">' + val + '</div><div class="t">' + t + "</div></div>";
+  $("cards").innerHTML =
+    card("Heart rate", v.heart_rate_bpm + " bpm", "measured (rPPG)") +
+    card("Blood pressure", b.systolic + "/" + b.diastolic, b.category + " · " + b.type) +
+    card("Cholesterol", c.value + " mg/dL", c.category + " · screening") +
+    card("Glucose (fasting est.)", g.value + " mg/dL", g.category + " · screening") +
+    card("HRV — SDNN / RMSSD", v.hrv.sdnn_ms + " / " + v.hrv.rmssd_ms + " ms", "pNN50 " + v.hrv.pnn50_pct + "%");
+  const ins = d.insight;
+  $("insight").innerHTML = "<b>Insight</b> — " + ins.summary + "<ul>" +
+    ins.points.map(p => "<li>" + p + "</li>").join("") + "</ul><b>Next steps:</b> " +
+    ins.next_steps.join(" ") + '<div class="src">Source: ' + ins.source + "</div>";
+}
+$("scanBtn").onclick = startScan;
+$("demoBtn").onclick = demoScan;
+</script>
+</body>
+</html>
