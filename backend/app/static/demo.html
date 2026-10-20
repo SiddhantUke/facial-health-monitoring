@@ -18,6 +18,7 @@
   button { background: #2f6df6; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px;
            font-size: 14px; cursor: pointer; margin: 12px 8px 0 0; }
   button.demo { background: #31456f; }
+  button.off { background: #b3402f; }
   button:disabled { opacity: .5; cursor: wait; }
   .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
   .card { background: #101b33; border: 1px solid #26355c; border-radius: 10px; padding: 12px 16px; min-width: 130px; }
@@ -44,6 +45,7 @@
     <div id="status">Camera idle. Fill the profile, then start a scan — or run the demo scan.</div>
     <button id="scanBtn">Start 30s webcam scan</button>
     <button id="demoBtn" class="demo">Demo scan (no camera)</button>
+    <button id="camOffBtn" class="off">Turn off camera</button>
   </div>
 
   <div class="panel" style="width:250px;">
@@ -77,6 +79,14 @@ async function startCamera() {
   if (stream) return;
   stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
   $("cam").srcObject = stream;
+}
+
+function turnOffCamera() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  $("cam").srcObject = null;
+  setBusy(false);
+  $("status").textContent = "Camera off. Press Start scan to turn it on again.";
 }
 
 function sampleFrame() {
@@ -143,6 +153,7 @@ async function send(payload) {
 }
 $("scanBtn").onclick = startScan;
 $("demoBtn").onclick = demoScan;
+$("camOffBtn").onclick = turnOffCamera;
 </script>
 </body>
 </html>
